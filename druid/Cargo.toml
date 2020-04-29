@@ -37,6 +37,7 @@ unicode-segmentation = "1.6.0"
 xi-unicode = "0.2.0"
 fnv = "1.0.7"
 instant = { version = "0.1.4", features = ["wasm-bindgen"] }
+xi-rope = { git = "https://github.com/xi-editor/xi-editor.git", rev = "65911d9", version = "0.3.0" }
 
 # Optional dependencies
 im = { version = "15.0.0", optional = true }
