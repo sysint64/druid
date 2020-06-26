@@ -8,7 +8,7 @@ You can find its changes [documented below](#060---2020-06-01).
 ### Highlights
 
 ### Added
-- Add `OPEN_PANEL_CANCELLED` and `SAVE_PANEL_CANCELLED` commands ([#1061] by @cmyr)
+- `OPEN_PANEL_CANCELLED` and `SAVE_PANEL_CANCELLED` commands. ([#1061] by @cmyr)
 
 ### Changed
 
@@ -341,7 +341,7 @@ Last release without a changelog :(
 [#1043]: https://github.com/linebender/druid/pull/1043
 [#1050]: https://github.com/linebender/druid/pull/1050
 [#1054]: https://github.com/linebender/druid/pull/1054
-[#1061]: https://github.com/xi-editor/druid/pull/1062
+[#1061]: https://github.com/linebender/druid/pull/1061
 
 [Unreleased]: https://github.com/linebender/druid/compare/v0.6.0...master
 [0.6.0]: https://github.com/linebender/druid/compare/v0.5.0...v0.6.0
@@ -349,4 +349,3 @@ Last release without a changelog :(
 [0.4.0]: https://github.com/linebender/druid/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/linebender/druid/compare/v0.3.1...v0.3.2
 [0.3.1]: https://github.com/linebender/druid/compare/v0.3.0...v0.3.1
-

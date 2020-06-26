@@ -209,7 +209,7 @@ pub mod sys {
     pub const SHOW_SAVE_PANEL: Selector<FileDialogOptions> =
         Selector::new("druid-builtin.menu-file-save-as");
 
-    /// Sent when the user cancels an open file panel.
+    /// Sent when the user cancels a save file panel.
     pub const SAVE_PANEL_CANCELLED: Selector = Selector::new("druid-builtin.save-panel-cancelled");
 
     /// Save the current file, must be handled by the application.
