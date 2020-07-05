@@ -29,6 +29,51 @@ use crate::{
 /// Our queue type
 pub(crate) type CommandQueue = VecDeque<Command>;
 
+/// Read-only structure to get information about currently focused widget and current focus scope.
+#[derive(Debug, Clone, Copy)]
+pub struct FocusNode {
+    /// id of the widget that owns the FocusNode
+    pub widget_id: Option<WidgetId>,
+    /// Current focus scope node
+    pub focus_scope: FocusScopeNode,
+    /// true if the widget that owns the FocusNode is focused
+    pub is_focused: bool,
+}
+
+/// Read-only structure to get information about current focus scope.
+#[derive(Debug, Clone, Copy)]
+pub struct FocusScopeNode {
+    /// id of the widget that owns the FocusScopeNode
+    pub widget_id: Option<WidgetId>,
+}
+
+impl FocusNode {
+    /// Create FocusNode from the WidgetId
+    pub fn from_widget_id(widget_id: WidgetId) -> Self {
+        FocusNode {
+            is_focused: false,
+            widget_id: Some(widget_id),
+            focus_scope: FocusScopeNode::empty(),
+        }
+    }
+
+    /// Create an empty FocusNode
+    pub fn empty() -> Self {
+        FocusNode {
+            is_focused: false,
+            widget_id: None,
+            focus_scope: FocusScopeNode::empty(),
+        }
+    }
+}
+
+impl FocusScopeNode {
+    /// Create an empty FocusScopeNode
+    pub fn empty() -> Self {
+        FocusScopeNode { widget_id: None }
+    }
+}
+
 /// A container for one widget in the hierarchy.
 ///
 /// Generally, container widgets don't contain other widgets directly,
@@ -108,7 +153,7 @@ pub(crate) struct WidgetState {
     /// Any descendant has requested update.
     pub(crate) request_update: bool,
 
-    pub(crate) focus_chain: Vec<WidgetId>,
+    pub(crate) focus_chains: HashMap<WidgetId, Vec<FocusNode>>,
     pub(crate) request_focus: Option<FocusChange>,
     pub(crate) children: Bloom<WidgetId>,
     pub(crate) children_changed: bool,
@@ -122,7 +167,7 @@ pub(crate) enum FocusChange {
     /// The focused widget is giving up focus.
     Resign,
     /// A specific widget wants focus
-    Focus(WidgetId),
+    Focus(FocusNode),
     /// Focus should pass to the next focusable widget
     Next,
     /// Focus should pass to the previous focusable widget
@@ -681,9 +726,9 @@ impl<T: Data, W: Widget<T>> WidgetPod<T, W> {
                 self.state.request_anim = false;
                 r
             }
-            Event::KeyDown(_) => self.state.has_focus,
-            Event::KeyUp(_) => self.state.has_focus,
-            Event::Paste(_) => self.state.has_focus,
+            Event::KeyDown(_) => ctx.state.focus_node.is_focused || self.state.has_focus,
+            Event::KeyUp(_) => ctx.state.focus_node.is_focused || self.state.has_focus,
+            Event::Paste(_) => ctx.state.focus_node.is_focused || self.state.has_focus,
             Event::Zoom(_) => had_active || self.state.is_hot,
             Event::Timer(_) => false, // This event was targeted only to our parent
             Event::Command(_) => true,
@@ -732,15 +777,15 @@ impl<T: Data, W: Widget<T>> WidgetPod<T, W> {
                     } else {
                         if self.state.children_changed {
                             self.state.children.clear();
-                            self.state.focus_chain.clear();
+                            self.state.focus_chains.clear();
                         }
                         self.state.children_changed
                     }
                 }
                 InternalLifeCycle::RouteFocusChanged { old, new } => {
-                    let this_changed = if *old == Some(self.state.id) {
+                    let this_changed = if old.widget_id == Some(self.state.id) {
                         Some(false)
-                    } else if *new == Some(self.state.id) {
+                    } else if new.widget_id == Some(self.state.id) {
                         Some(true)
                     } else {
                         None
@@ -755,9 +800,9 @@ impl<T: Data, W: Widget<T>> WidgetPod<T, W> {
 
                     // Recurse when the target widgets could be our descendants.
                     // The bloom filter we're checking can return false positives.
-                    match (old, new) {
-                        (Some(old), _) if self.state.children.may_contain(old) => true,
-                        (_, Some(new)) if self.state.children.may_contain(new) => true,
+                    match (old.widget_id, new.widget_id) {
+                        (Some(old), _) if self.state.children.may_contain(&old) => true,
+                        (_, Some(new)) if self.state.children.may_contain(&new) => true,
                         _ => false,
                     }
                 }
@@ -820,7 +865,12 @@ impl<T: Data, W: Widget<T>> WidgetPod<T, W> {
             LifeCycle::WidgetAdded | LifeCycle::Internal(InternalLifeCycle::RouteWidgetAdded) => {
                 self.state.children_changed = false;
                 ctx.widget_state.children = ctx.widget_state.children.union(self.state.children);
-                ctx.widget_state.focus_chain.extend(&self.state.focus_chain);
+
+                for (&key, value) in self.state.focus_chains.iter() {
+                    let entry = ctx.widget_state.focus_chains.entry(key).or_default();
+                    entry.extend(value);
+                }
+
                 ctx.register_child(self.id());
             }
             _ => (),
@@ -888,7 +938,7 @@ impl WidgetState {
             request_anim: false,
             request_update: false,
             request_focus: None,
-            focus_chain: Vec::new(),
+            focus_chains: HashMap::new(),
             children: Bloom::new(),
             children_changed: false,
             timers: HashMap::new(),
@@ -955,7 +1005,7 @@ impl WidgetState {
 mod tests {
     use super::*;
     use crate::ext_event::ExtEventHost;
-    use crate::widget::{Flex, Scroll, Split, TextBox};
+    use crate::widget::{Flex, FocusScope, Scroll, Split, TextBox};
     use crate::{WidgetExt, WindowHandle, WindowId};
 
     const ID_1: WidgetId = WidgetId::reserved(0);
@@ -965,13 +1015,13 @@ mod tests {
     #[test]
     fn register_children() {
         fn make_widgets() -> impl Widget<Option<u32>> {
-            Split::columns(
+            FocusScope::new(Split::columns(
                 Flex::<Option<u32>>::row()
                     .with_child(TextBox::new().with_id(ID_1).parse())
                     .with_child(TextBox::new().with_id(ID_2).parse())
                     .with_child(TextBox::new().with_id(ID_3).parse()),
                 Scroll::new(TextBox::new().parse()),
-            )
+            ))
         }
 
         let widget = make_widgets();
@@ -1001,6 +1051,6 @@ mod tests {
         assert!(ctx.widget_state.children.may_contain(&ID_1));
         assert!(ctx.widget_state.children.may_contain(&ID_2));
         assert!(ctx.widget_state.children.may_contain(&ID_3));
-        assert_eq!(ctx.widget_state.children.entry_count(), 7);
+        assert_eq!(ctx.widget_state.children.entry_count(), 8);
     }
 }

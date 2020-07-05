@@ -163,6 +163,7 @@ fn propogate_hot() {
         assert!(root_rec.is_empty() && padding_rec.is_empty() && button_rec.is_empty());
     });
 }
+
 #[test]
 fn take_focus() {
     const TAKE_FOCUS: Selector = Selector::new("druid-tests.take-focus");
@@ -172,13 +173,15 @@ fn take_focus() {
     fn make_focus_taker(inner: Rc<Cell<Option<bool>>>) -> impl Widget<bool> {
         ModularWidget::new(inner)
             .event_fn(|_, ctx, event, _data, _env| {
+                ctx.set_focus_node(FocusNode::from_widget_id(ctx.widget_id()));
                 if let Event::Command(cmd) = event {
                     if cmd.is(TAKE_FOCUS) {
                         ctx.request_focus();
                     }
                 }
             })
-            .lifecycle_fn(|is_focused, _, event, _data, _env| {
+            .lifecycle_fn(|is_focused, ctx, event, _data, _env| {
+                ctx.set_focus_node(FocusNode::from_widget_id(ctx.widget_id()));
                 if let LifeCycle::FocusChanged(focus) = event {
                     is_focused.set(Some(*focus));
                 }
@@ -205,26 +208,26 @@ fn take_focus() {
 
         // this is sent to all widgets; the last widget to request focus should get it
         harness.submit_command(TAKE_FOCUS);
-        assert_eq!(harness.window().focus, Some(id_2));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_2));
         assert_eq!(left_focus.get(), None);
         assert_eq!(right_focus.get(), Some(true));
 
         // this is sent to all widgets; the last widget to request focus should still get it
         // NOTE: This tests siblings in particular, so careful when moving away from Split.
         harness.submit_command(TAKE_FOCUS);
-        assert_eq!(harness.window().focus, Some(id_2));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_2));
         assert_eq!(left_focus.get(), None);
         assert_eq!(right_focus.get(), Some(true));
 
         // this is sent to a specific widget; it should get focus
         harness.submit_command(TAKE_FOCUS.to(id_1));
-        assert_eq!(harness.window().focus, Some(id_1));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_1));
         assert_eq!(left_focus.get(), Some(true));
         assert_eq!(right_focus.get(), Some(false));
 
         // this is sent to a specific widget; it should get focus
         harness.submit_command(TAKE_FOCUS.to(id_2));
-        assert_eq!(harness.window().focus, Some(id_2));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_2));
         assert_eq!(left_focus.get(), Some(false));
         assert_eq!(right_focus.get(), Some(true));
     })
@@ -239,6 +242,7 @@ fn focus_changed() {
     fn make_focus_container(children: Vec<WidgetPod<(), Box<dyn Widget<()>>>>) -> impl Widget<()> {
         ModularWidget::new(children)
             .event_fn(|children, ctx, event, data, env| {
+                ctx.set_focus_node(FocusNode::from_widget_id(ctx.widget_id()));
                 if let Event::Command(cmd) = event {
                     if cmd.is(TAKE_FOCUS) {
                         ctx.request_focus();
@@ -249,9 +253,11 @@ fn focus_changed() {
                         ctx.request_focus();
                     }
                 }
-                children
-                    .iter_mut()
-                    .for_each(|a| a.event(ctx, event, data, env));
+                children.iter_mut().for_each(|a| {
+                    ctx.set_focus_node(FocusNode::from_widget_id(a.id()));
+                    a.event(ctx, event, data, env)
+                });
+                ctx.set_focus_node(FocusNode::from_widget_id(ctx.widget_id()));
                 if let Event::Command(cmd) = event {
                     if cmd.is(ALL_TAKE_FOCUS_AFTER) {
                         ctx.request_focus();
@@ -259,6 +265,7 @@ fn focus_changed() {
                 }
             })
             .lifecycle_fn(|children, ctx, event, data, env| {
+                ctx.set_focus_node(FocusNode::from_widget_id(ctx.widget_id()));
                 children
                     .iter_mut()
                     .for_each(|a| a.lifecycle(ctx, event, data, env));
@@ -292,42 +299,42 @@ fn focus_changed() {
 
         // focus none -> a
         harness.submit_command(TAKE_FOCUS.to(id_a));
-        assert_eq!(harness.window().focus, Some(id_a));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_a));
         assert!(changed(&a_rec, true));
         assert!(no_change(&b_rec));
         assert!(no_change(&c_rec));
 
         // focus a -> b
         harness.submit_command(TAKE_FOCUS.to(id_b));
-        assert_eq!(harness.window().focus, Some(id_b));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_b));
         assert!(changed(&a_rec, false));
         assert!(changed(&b_rec, true));
         assert!(no_change(&c_rec));
 
         // focus b -> c
         harness.submit_command(TAKE_FOCUS.to(id_c));
-        assert_eq!(harness.window().focus, Some(id_c));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_c));
         assert!(no_change(&a_rec));
         assert!(changed(&b_rec, false));
         assert!(changed(&c_rec, true));
 
         // focus c -> a
         harness.submit_command(TAKE_FOCUS.to(id_a));
-        assert_eq!(harness.window().focus, Some(id_a));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_a));
         assert!(changed(&a_rec, true));
         assert!(no_change(&b_rec));
         assert!(changed(&c_rec, false));
 
         // all focus before passing down the event
         harness.submit_command(ALL_TAKE_FOCUS_BEFORE);
-        assert_eq!(harness.window().focus, Some(id_c));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_c));
         assert!(changed(&a_rec, false));
         assert!(no_change(&b_rec));
         assert!(changed(&c_rec, true));
 
         // all focus after passing down the event
         harness.submit_command(ALL_TAKE_FOCUS_AFTER);
-        assert_eq!(harness.window().focus, Some(id_a));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_a));
         assert!(changed(&a_rec, true));
         assert!(no_change(&b_rec));
         assert!(changed(&c_rec, false));
@@ -342,7 +349,7 @@ fn simple_lifecyle() {
         harness.send_initial_events();
         assert!(matches!(record.next(), Record::L(LifeCycle::WidgetAdded)));
         assert!(matches!(record.next(), Record::E(Event::WindowConnected)));
-        assert!(matches!(record.next(), Record::E(Event::WindowSize(_))));
+        assert!(matches!(record.next(), Record::None));
         assert!(record.is_empty());
     })
 }
@@ -388,15 +395,23 @@ fn participate_in_autofocus() {
 
     // this widget starts with a single child, and will replace them with a split
     // when we send it a command.
-    let replacer = ReplaceChild::new(TextBox::new().with_id(id_4), move || {
-        Split::columns(TextBox::new().with_id(id_5), TextBox::new().with_id(id_6))
+    let replacer = ReplaceChild::new(Focus::new(SizedBox::empty()).with_id(id_4), move || {
+        Split::columns(
+            Focus::new(SizedBox::empty()).with_id(id_5),
+            Focus::new(SizedBox::empty()).with_id(id_6),
+        )
     });
 
     let widget = Split::columns(
         Flex::row()
-            .with_flex_child(TextBox::new().with_id(id_1), 1.0)
-            .with_flex_child(TextBox::new().with_id(id_2), 1.0)
-            .with_flex_child(TextBox::new().with_id(id_3), 1.0),
+            .with_flex_child(
+                Focus::new(SizedBox::empty())
+                    .with_auto_focus(true)
+                    .with_id(id_1),
+                1.0,
+            )
+            .with_flex_child(Focus::new(SizedBox::empty()).with_id(id_2), 1.0)
+            .with_flex_child(Focus::new(SizedBox::empty()).with_id(id_3), 1.0),
         replacer,
     );
 
@@ -406,17 +421,30 @@ fn participate_in_autofocus() {
         harness.inspect_state(|state| assert!(state.children_changed));
 
         harness.send_initial_events();
+
         // verify that we start out with four widgets registered for focus
-        assert_eq!(harness.window().focus_chain(), &[id_1, id_2, id_3, id_4]);
+
+        let focus_chain = |harness: &Harness<String>| {
+            harness
+                .window()
+                .focus_chain()
+                .map(|chain| -> Vec<WidgetId> {
+                    chain
+                        .iter()
+                        .filter(|node| node.widget_id.is_some())
+                        .map(|node| node.widget_id.unwrap())
+                        .collect()
+                })
+                .unwrap()
+        };
+
+        assert_eq!(focus_chain(harness), &[id_1, id_2, id_3, id_4]);
 
         // tell the replacer widget to swap its children
         harness.submit_command(REPLACE_CHILD);
 
         // verify that the two new children are registered for focus.
-        assert_eq!(
-            harness.window().focus_chain(),
-            &[id_1, id_2, id_3, id_5, id_6]
-        );
+        assert_eq!(focus_chain(harness), &[id_1, id_2, id_3, id_5, id_6]);
 
         // verify that no widgets still report that their children changed:
         harness.inspect_state(|state| assert!(!state.children_changed))

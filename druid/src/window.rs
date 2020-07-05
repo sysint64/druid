@@ -30,7 +30,7 @@ use crate::util::ExtendDrain;
 use crate::widget::LabelText;
 use crate::win_handler::RUN_COMMANDS_TOKEN;
 use crate::{
-    BoxConstraints, Command, Data, Env, Event, EventCtx, ExtEventSink, InternalEvent,
+    BoxConstraints, Command, Data, Env, Event, EventCtx, ExtEventSink, FocusNode, InternalEvent,
     InternalLifeCycle, LayoutCtx, LifeCycle, LifeCycleCtx, MenuDesc, PaintCtx, TimerToken,
     UpdateCtx, Widget, WidgetId, WidgetPod, WindowDesc,
 };
@@ -50,7 +50,7 @@ pub struct Window<T> {
     pub(crate) context_menu: Option<MenuDesc<T>>,
     pub(crate) last_anim: Option<Instant>,
     pub(crate) last_mouse_pos: Option<Point>,
-    pub(crate) focus: Option<WidgetId>,
+    pub(crate) focus_node: FocusNode,
     pub(crate) handle: WindowHandle,
     pub(crate) timers: HashMap<TimerToken, WidgetId>,
     ext_handle: ExtEventSink,
@@ -74,7 +74,7 @@ impl<T> Window<T> {
             context_menu: None,
             last_anim: None,
             last_mouse_pos: None,
-            focus: None,
+            focus_node: FocusNode::empty(),
             handle,
             timers: HashMap::new(),
             ext_handle,
@@ -88,8 +88,14 @@ impl<T: Data> Window<T> {
         self.root.state().request_anim
     }
 
-    pub(crate) fn focus_chain(&self) -> &[WidgetId] {
-        &self.root.state().focus_chain
+    pub(crate) fn focus_chain(&self) -> Option<&[FocusNode]> {
+        self.focus_node.focus_scope.widget_id.and_then(|id| {
+            self.root
+                .state()
+                .focus_chains
+                .get(&id)
+                .map(|it| it.as_slice())
+        })
     }
 
     /// Returns `true` if the provided widget may be in this window,
@@ -212,8 +218,13 @@ impl<T: Data> Window<T> {
 
         let mut widget_state = WidgetState::new(self.root.id(), Some(self.size));
         let is_handled = {
-            let mut state =
-                ContextState::new::<T>(queue, &self.ext_handle, &self.handle, self.id, self.focus);
+            let mut state = ContextState::new::<T>(
+                queue,
+                &self.ext_handle,
+                &self.handle,
+                self.id,
+                self.focus_node.widget_id,
+            );
             let mut ctx = EventCtx {
                 cursor: &mut cursor,
                 state: &mut state,
@@ -233,13 +244,13 @@ impl<T: Data> Window<T> {
         }
 
         if let Some(focus_req) = widget_state.request_focus.take() {
-            let old = self.focus;
+            let old = self.focus_node;
             let new = self.widget_for_focus_request(focus_req);
             // Only send RouteFocusChanged in case there's actual change
-            if old != new {
+            if old.widget_id != new.widget_id {
                 let event = LifeCycle::Internal(InternalLifeCycle::RouteFocusChanged { old, new });
                 self.lifecycle(queue, &event, data, env, false);
-                self.focus = new;
+                self.focus_node = new;
             }
         }
 
@@ -261,8 +272,13 @@ impl<T: Data> Window<T> {
         process_commands: bool,
     ) {
         let mut widget_state = WidgetState::new(self.root.id(), Some(self.size));
-        let mut state =
-            ContextState::new::<T>(queue, &self.ext_handle, &self.handle, self.id, self.focus);
+        let mut state = ContextState::new::<T>(
+            queue,
+            &self.ext_handle,
+            &self.handle,
+            self.id,
+            self.focus_node.widget_id,
+        );
         let mut ctx = LifeCycleCtx {
             state: &mut state,
             widget_state: &mut widget_state,
@@ -275,8 +291,13 @@ impl<T: Data> Window<T> {
         self.update_title(data, env);
 
         let mut widget_state = WidgetState::new(self.root.id(), Some(self.size));
-        let mut state =
-            ContextState::new::<T>(queue, &self.ext_handle, &self.handle, self.id, self.focus);
+        let mut state = ContextState::new::<T>(
+            queue,
+            &self.ext_handle,
+            &self.handle,
+            self.id,
+            self.focus_node.widget_id,
+        );
         let mut update_ctx = UpdateCtx {
             widget_state: &mut widget_state,
             state: &mut state,
@@ -342,8 +363,13 @@ impl<T: Data> Window<T> {
 
     fn layout(&mut self, queue: &mut CommandQueue, data: &T, env: &Env) {
         let mut widget_state = WidgetState::new(self.root.id(), Some(self.size));
-        let mut state =
-            ContextState::new::<T>(queue, &self.ext_handle, &self.handle, self.id, self.focus);
+        let mut state = ContextState::new::<T>(
+            queue,
+            &self.ext_handle,
+            &self.handle,
+            self.id,
+            self.focus_node.widget_id,
+        );
         let mut layout_ctx = LayoutCtx {
             state: &mut state,
             widget_state: &mut widget_state,
@@ -376,8 +402,13 @@ impl<T: Data> Window<T> {
         env: &Env,
     ) {
         let widget_state = WidgetState::new(self.root.id(), Some(self.size));
-        let mut state =
-            ContextState::new::<T>(queue, &self.ext_handle, &self.handle, self.id, self.focus);
+        let mut state = ContextState::new::<T>(
+            queue,
+            &self.ext_handle,
+            &self.handle,
+            self.id,
+            self.focus_node.widget_id,
+        );
         let mut ctx = PaintCtx {
             render_ctx: piet,
             state: &mut state,
@@ -419,41 +450,44 @@ impl<T: Data> Window<T> {
             .or_else(|| self.menu.as_ref().and_then(|m| m.command_for_id(cmd_id)))
     }
 
-    fn widget_for_focus_request(&self, focus: FocusChange) -> Option<WidgetId> {
+    fn widget_for_focus_request(&self, focus: FocusChange) -> FocusNode {
         match focus {
-            FocusChange::Resign => None,
-            FocusChange::Focus(id) => Some(id),
+            FocusChange::Resign => FocusNode::empty(),
+            FocusChange::Focus(focus_node) => focus_node,
             FocusChange::Next => self.widget_from_focus_chain(true),
             FocusChange::Previous => self.widget_from_focus_chain(false),
         }
     }
 
-    fn widget_from_focus_chain(&self, forward: bool) -> Option<WidgetId> {
-        self.focus.and_then(|focus| {
-            self.focus_chain()
-                .iter()
-                // Find where the focused widget is in the focus chain
-                .position(|id| id == &focus)
-                .map(|idx| {
-                    // Return the id that's next to it in the focus chain
-                    let len = self.focus_chain().len();
-                    let new_idx = if forward {
-                        (idx + 1) % len
-                    } else {
-                        (idx + len - 1) % len
-                    };
-                    self.focus_chain()[new_idx]
-                })
-                .or_else(|| {
-                    // If the currently focused widget isn't in the focus chain,
-                    // then we'll just return the first/last entry of the chain, if any.
-                    if forward {
-                        self.focus_chain().first().copied()
-                    } else {
-                        self.focus_chain().last().copied()
-                    }
-                })
-        })
+    fn widget_from_focus_chain(&self, forward: bool) -> FocusNode {
+        match self.focus_chain() {
+            Some(chain) => {
+                chain
+                    .iter()
+                    .position(|node| node.widget_id == self.focus_node.widget_id)
+                    .map(|idx| {
+                        // Return the id that's next to it in the focus chain
+                        let len = chain.len();
+                        let new_idx = if forward {
+                            (idx + 1) % len
+                        } else {
+                            (idx + len - 1) % len
+                        };
+                        chain[new_idx]
+                    })
+                    .or_else(|| {
+                        // If the currently focused widget isn't in the focus chain,
+                        // then we'll just return the first/last entry of the chain, if any.
+                        if forward {
+                            chain.first().copied()
+                        } else {
+                            chain.last().copied()
+                        }
+                    })
+                    .unwrap_or_else(FocusNode::empty)
+            }
+            None => FocusNode::empty(),
+        }
     }
 }
 

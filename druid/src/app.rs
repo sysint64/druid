@@ -17,7 +17,7 @@
 use crate::ext_event::{ExtEventHost, ExtEventSink};
 use crate::kurbo::{Point, Size};
 use crate::shell::{Application, Error as PlatformError, WindowBuilder, WindowHandle};
-use crate::widget::LabelText;
+use crate::widget::{FocusScope, LabelText};
 use crate::win_handler::{AppHandler, AppState};
 use crate::window::WindowId;
 use crate::{
@@ -157,7 +157,7 @@ impl<T: Data> WindowDesc<T> {
         // wrap this closure in another closure that boxes the created widget.
         // this just makes our API slightly cleaner; callers don't need to explicitly box.
         WindowDesc {
-            root: root().boxed(),
+            root: FocusScope::new(root()).boxed(),
             title: LocalizedString::new("app-name").into(),
             size: None,
             min_size: None,

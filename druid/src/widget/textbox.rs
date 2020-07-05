@@ -18,8 +18,8 @@ use std::time::Duration;
 
 use crate::widget::prelude::*;
 use crate::{
-    Application, BoxConstraints, Cursor, Data, Env, FontDescriptor, HotKey, KbKey, KeyOrValue,
-    Selector, SysMods, TimerToken,
+    commands, Application, BoxConstraints, Cursor, Data, Env, FocusNode, FontDescriptor, HotKey,
+    KbKey, KeyOrValue, Selector, SysMods, TimerToken,
 };
 
 use crate::kurbo::{Affine, Insets, Point, Size};
@@ -47,6 +47,7 @@ pub struct TextBox {
     selection: Selection,
     cursor_timer: TimerToken,
     cursor_on: bool,
+    focus_node: FocusNode,
 }
 
 impl TextBox {
@@ -65,6 +66,7 @@ impl TextBox {
             cursor_timer: TimerToken::INVALID,
             cursor_on: false,
             placeholder: String::new(),
+            focus_node: FocusNode::empty(),
         }
     }
 
@@ -258,6 +260,9 @@ impl TextBox {
 
 impl Widget<String> for TextBox {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut String, env: &Env) {
+        let previous_focus_node = ctx.focus_node();
+        ctx.set_focus_node(self.focus_node);
+
         // Guard against external changes in data?
         self.selection = self.selection.constrain_to(data);
         let mut edit_action = None;
@@ -371,12 +376,19 @@ impl Widget<String> for TextBox {
                 self.update_hscroll();
             }
         }
+
+        ctx.set_focus_node(previous_focus_node);
     }
 
     fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &String, env: &Env) {
         match event {
             LifeCycle::WidgetAdded => {
+                let previous_focus_node = ctx.focus_node();
+                self.focus_node.widget_id = Some(ctx.widget_id());
+                ctx.set_focus_node(self.focus_node);
                 ctx.register_for_focus();
+                ctx.set_focus_node(previous_focus_node);
+
                 if data.is_empty() {
                     self.text.set_text(self.placeholder.as_str());
                     self.text.set_text_color(theme::PLACEHOLDER_COLOR);
@@ -386,7 +398,17 @@ impl Widget<String> for TextBox {
                 self.text.rebuild_if_needed(ctx.text(), env);
             }
             // an open question: should we be able to schedule timers here?
-            LifeCycle::FocusChanged(true) => ctx.submit_command(RESET_BLINK.to(ctx.widget_id())),
+            LifeCycle::FocusChanged(value) => {
+                self.focus_node.is_focused = *value;
+
+                ctx.submit_command(
+                    commands::FOCUS_NODE_FOCUS_CHANGED
+                        .with(*value)
+                        .to(ctx.widget_id()),
+                );
+                ctx.submit_command(RESET_BLINK.to(ctx.widget_id()));
+                ctx.request_paint();
+            }
             _ => (),
         }
     }
@@ -433,6 +455,9 @@ impl Widget<String> for TextBox {
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx, data: &String, env: &Env) {
+        let previous_focus_node = ctx.focus_node();
+        ctx.set_focus_node(self.focus_node);
+
         // Guard against changes in data following `event`
         let content = if data.is_empty() {
             &self.placeholder
@@ -498,6 +523,7 @@ impl Widget<String> for TextBox {
 
         // Paint the border
         ctx.stroke(clip_rect, &border_color, BORDER_WIDTH);
+        ctx.set_focus_node(previous_focus_node);
     }
 }
 

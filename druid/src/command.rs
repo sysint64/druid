@@ -146,7 +146,7 @@ pub mod sys {
     use std::any::Any;
 
     use super::Selector;
-    use crate::{FileDialogOptions, FileInfo, SingleUse};
+    use crate::{FileDialogOptions, FileInfo, SingleUse, WidgetId};
 
     /// Quit the running application. This command is handled by the druid library.
     pub const QUIT_APP: Selector = Selector::new("druid-builtin.quit-app");
@@ -259,6 +259,14 @@ pub mod sys {
 
     /// Redo.
     pub const REDO: Selector = Selector::new("druid-builtin.menu-redo");
+
+    /// Notify descendens that focus node has changed focus.
+    /// The payload indicates wheter the focus_node in the context is focused or not.
+    pub const FOCUS_NODE_FOCUS_CHANGED: Selector<bool> =
+        Selector::new("druid-builtin.focus_node_focus_changed");
+
+    /// Request focus for widget
+    pub const REQUEST_FOCUS: Selector<WidgetId> = Selector::new("druid-builtin.request_focus");
 }
 
 impl Selector<()> {
