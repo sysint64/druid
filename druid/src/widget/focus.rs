@@ -16,9 +16,7 @@
 
 use druid::widget::prelude::*;
 
-use druid::{
-    commands, Data, FocusNode, HotKey, KbKey, Point, Rect, SysMods, Widget, WidgetPod,
-};
+use druid::{commands, Data, FocusNode, HotKey, KbKey, Point, Rect, SysMods, Widget, WidgetPod};
 
 /// A widget that allow focus to be given to this widget and its descendants.
 pub struct Focus<T> {
