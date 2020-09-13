@@ -29,7 +29,7 @@ use crate::{
 /// Our queue type
 pub(crate) type CommandQueue = VecDeque<Command>;
 
-/// Read-only structure to get information about currently focused widget and current focus scope.
+/// Read-only structure to get information about the currently focused widget and current focus scope.
 #[derive(Debug, Clone, Copy)]
 pub struct FocusNode {
     /// id of the widget that owns the FocusNode
@@ -40,7 +40,7 @@ pub struct FocusNode {
     pub is_focused: bool,
 }
 
-/// Read-only structure to get information about current focus scope.
+/// Read-only structure to get information about the current focus scope.
 #[derive(Debug, Clone, Copy)]
 pub struct FocusScopeNode {
     /// id of the widget that owns the FocusScopeNode
