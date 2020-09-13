@@ -19,11 +19,12 @@ use std::time::Duration;
 use crate::widget::prelude::*;
 use crate::{
     commands, Application, BoxConstraints, Cursor, Data, Env, FocusNode, FontDescriptor, HotKey,
-    KbKey, KeyOrValue, Selector, SysMods, TimerToken,
+    KbKey, KeyOrValue, Rect, Selector, SysMods, TimerToken, WidgetPod,
 };
 
 use crate::kurbo::{Affine, Insets, Point, Size};
 use crate::theme;
+use crate::widget::Focus;
 
 use crate::text::{
     movement, offset_for_delete_backwards, BasicTextInput, EditAction, EditableText, MouseAction,
@@ -37,9 +38,83 @@ const TEXT_INSETS: Insets = Insets::new(4.0, 2.0, 0.0, 2.0);
 const RESET_BLINK: Selector = Selector::new("druid-builtin.reset-textbox-blink");
 const CURSOR_BLINK_DURATION: Duration = Duration::from_millis(500);
 
-/// A widget that allows user text input.
-#[derive(Debug, Clone)]
 pub struct TextBox {
+    placeholder: String,
+    auto_focus: bool,
+    child: Option<WidgetPod<String, Box<dyn Widget<String>>>>,
+}
+
+impl TextBox {
+    pub fn new() -> Self {
+        TextBox {
+            placeholder: String::new(),
+            auto_focus: false,
+            child: Option::None,
+        }
+    }
+
+    pub fn build(&self) -> impl Widget<String> + 'static {
+        Focus::new(TextBoxImpl::new().with_placeholder(self.placeholder.clone()))
+            .with_auto_focus(self.auto_focus)
+    }
+
+    /// Builder-style method to set the `TextBox`'s placeholder text.
+    pub fn with_placeholder(mut self, placeholder: impl Into<String>) -> Self {
+        self.placeholder = placeholder.into();
+        self
+    }
+}
+impl Widget<String> for TextBox {
+    fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut String, env: &Env) {
+        if let Some(child) = &mut self.child {
+            child.event(ctx, event, data, env);
+        }
+    }
+
+    fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &String, env: &Env) {
+        if let LifeCycle::WidgetAdded = event {
+            self.child.replace(WidgetPod::new(self.build()).boxed());
+        }
+
+        if let Some(child) = &mut self.child {
+            child.lifecycle(ctx, event, data, env);
+        }
+    }
+
+    fn update(&mut self, ctx: &mut UpdateCtx, _: &String, data: &String, env: &Env) {
+        if let Some(child) = &mut self.child {
+            child.update(ctx, data, env);
+        }
+    }
+
+    fn layout(
+        &mut self,
+        ctx: &mut LayoutCtx,
+        bc: &BoxConstraints,
+        data: &String,
+        env: &Env,
+    ) -> Size {
+        match &mut self.child {
+            Some(child) => {
+                let size = child.layout(ctx, &bc, data, env);
+                let rect = Rect::from_origin_size(Point::ORIGIN, size);
+                child.set_layout_rect(ctx, data, env, rect);
+                size
+            }
+            None => Size::ZERO,
+        }
+    }
+
+    fn paint(&mut self, ctx: &mut PaintCtx, data: &String, env: &Env) {
+        if let Some(child) = &mut self.child {
+            child.paint(ctx, data, env);
+        }
+    }
+}
+
+/// A widget that allows user text input.
+// #[derive(Debug, Clone)]
+struct TextBoxImpl {
     placeholder: String,
     text: TextLayout,
     width: f64,
@@ -47,16 +122,15 @@ pub struct TextBox {
     selection: Selection,
     cursor_timer: TimerToken,
     cursor_on: bool,
-    focus_node: FocusNode,
 }
 
-impl TextBox {
+impl TextBoxImpl {
     /// Perform an `EditAction`. The payload *must* be an `EditAction`.
     pub const PERFORM_EDIT: Selector<EditAction> =
         Selector::new("druid-builtin.textbox.perform-edit");
 
     /// Create a new TextBox widget
-    pub fn new() -> TextBox {
+    pub fn new() -> TextBoxImpl {
         let text = TextLayout::new("");
         Self {
             width: 0.0,
@@ -66,7 +140,6 @@ impl TextBox {
             cursor_timer: TimerToken::INVALID,
             cursor_on: false,
             placeholder: String::new(),
-            focus_node: FocusNode::empty(),
         }
     }
 
@@ -258,11 +331,8 @@ impl TextBox {
     }
 }
 
-impl Widget<String> for TextBox {
+impl Widget<String> for TextBoxImpl {
     fn event(&mut self, ctx: &mut EventCtx, event: &Event, data: &mut String, env: &Env) {
-        let previous_focus_node = ctx.focus_node();
-        ctx.set_focus_node(self.focus_node);
-
         // Guard against external changes in data?
         self.selection = self.selection.constrain_to(data);
         let mut edit_action = None;
@@ -309,7 +379,7 @@ impl Widget<String> for TextBox {
                 }
             }
             Event::Command(ref cmd)
-                if ctx.is_focused()
+                if ctx.focus_node().is_focused
                     && (cmd.is(crate::commands::COPY) || cmd.is(crate::commands::CUT)) =>
             {
                 if let Some(text) = data.slice(self.selection.range()) {
@@ -321,9 +391,13 @@ impl Widget<String> for TextBox {
                 ctx.set_handled();
             }
             Event::Command(cmd) if cmd.is(RESET_BLINK) => self.reset_cursor_blink(ctx),
-            Event::Command(cmd) if cmd.is(TextBox::PERFORM_EDIT) => {
-                let edit = cmd.get_unchecked(TextBox::PERFORM_EDIT);
+            Event::Command(cmd) if cmd.is(TextBoxImpl::PERFORM_EDIT) => {
+                let edit = cmd.get_unchecked(TextBoxImpl::PERFORM_EDIT);
                 self.do_edit_action(edit.to_owned(), data);
+            }
+            Event::Command(cmd) if cmd.is(commands::FOCUS_NODE_FOCUS_CHANGED) => {
+                self.reset_cursor_blink(ctx);
+                ctx.request_paint();
             }
             Event::Paste(ref item) => {
                 if let Some(string) = item.get_string() {
@@ -333,15 +407,6 @@ impl Widget<String> for TextBox {
             }
             Event::KeyDown(key_event) => {
                 let event_handled = match key_event {
-                    // Tab and shift+tab
-                    k_e if HotKey::new(None, KbKey::Tab).matches(k_e) => {
-                        ctx.focus_next();
-                        true
-                    }
-                    k_e if HotKey::new(SysMods::Shift, KbKey::Tab).matches(k_e) => {
-                        ctx.focus_prev();
-                        true
-                    }
                     k_e if HotKey::new(None, KbKey::Enter).matches(k_e) => {
                         // 'enter' should do something, maybe?
                         // but for now we are suppressing it, because we don't want
@@ -376,40 +441,17 @@ impl Widget<String> for TextBox {
                 self.update_hscroll();
             }
         }
-
-        ctx.set_focus_node(previous_focus_node);
     }
 
     fn lifecycle(&mut self, ctx: &mut LifeCycleCtx, event: &LifeCycle, data: &String, env: &Env) {
-        match event {
-            LifeCycle::WidgetAdded => {
-                let previous_focus_node = ctx.focus_node();
-                self.focus_node.widget_id = Some(ctx.widget_id());
-                ctx.set_focus_node(self.focus_node);
-                ctx.register_for_focus();
-                ctx.set_focus_node(previous_focus_node);
-
-                if data.is_empty() {
-                    self.text.set_text(self.placeholder.as_str());
-                    self.text.set_text_color(theme::PLACEHOLDER_COLOR);
-                } else {
-                    self.text.set_text(data.as_str());
-                }
-                self.text.rebuild_if_needed(ctx.text(), env);
+        if let LifeCycle::WidgetAdded = event {
+            if data.is_empty() {
+                self.text.set_text(self.placeholder.as_str());
+                self.text.set_text_color(theme::PLACEHOLDER_COLOR);
+            } else {
+                self.text.set_text(data.as_str());
             }
-            // an open question: should we be able to schedule timers here?
-            LifeCycle::FocusChanged(value) => {
-                self.focus_node.is_focused = *value;
-
-                ctx.submit_command(
-                    commands::FOCUS_NODE_FOCUS_CHANGED
-                        .with(*value)
-                        .to(ctx.widget_id()),
-                );
-                ctx.submit_command(RESET_BLINK.to(ctx.widget_id()));
-                ctx.request_paint();
-            }
-            _ => (),
+            self.text.rebuild_if_needed(ctx.text(), env);
         }
     }
 
@@ -455,9 +497,6 @@ impl Widget<String> for TextBox {
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx, data: &String, env: &Env) {
-        let previous_focus_node = ctx.focus_node();
-        ctx.set_focus_node(self.focus_node);
-
         // Guard against changes in data following `event`
         let content = if data.is_empty() {
             &self.placeholder
@@ -472,7 +511,7 @@ impl Widget<String> for TextBox {
         let selection_color = env.get(theme::SELECTION_COLOR);
         let cursor_color = env.get(theme::CURSOR_COLOR);
 
-        let is_focused = ctx.is_focused();
+        let is_focused = ctx.focus_node().is_focused;
 
         let border_color = if is_focused {
             env.get(theme::PRIMARY_LIGHT)
@@ -523,13 +562,12 @@ impl Widget<String> for TextBox {
 
         // Paint the border
         ctx.stroke(clip_rect, &border_color, BORDER_WIDTH);
-        ctx.set_focus_node(previous_focus_node);
     }
 }
 
-impl Default for TextBox {
+impl Default for TextBoxImpl {
     fn default() -> Self {
-        TextBox::new()
+        TextBoxImpl::new()
     }
 }
 
@@ -541,7 +579,7 @@ mod tests {
     /// can still be used to insert characters.
     #[test]
     fn data_can_be_changed_externally() {
-        let mut widget = TextBox::new();
+        let mut widget = TextBoxImpl::new();
         let mut data = "".to_string();
 
         // First insert some chars
@@ -563,7 +601,7 @@ mod tests {
     /// Test backspace on the combo character o̷
     #[test]
     fn backspace_combining() {
-        let mut widget = TextBox::new();
+        let mut widget = TextBoxImpl::new();
         let mut data = "".to_string();
 
         widget.insert(&mut data, "\u{0073}\u{006F}\u{0337}\u{0073}");
@@ -577,7 +615,7 @@ mod tests {
     /// Devanagari codepoints are 3 utf-8 code units each.
     #[test]
     fn backspace_devanagari() {
-        let mut widget = TextBox::new();
+        let mut widget = TextBoxImpl::new();
         let mut data = "".to_string();
 
         widget.insert(&mut data, "हिन्दी");

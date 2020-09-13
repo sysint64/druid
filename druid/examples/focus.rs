@@ -16,7 +16,9 @@
 
 pub use druid::theme;
 use druid::widget::prelude::*;
-use druid::widget::{Button, Container, Flex, Focus, FocusScope, Label, WidgetExt};
+use druid::widget::{
+    Button, Container, Flex, Focus, FocusScope, TextBox, Label, WidgetExt,
+};
 
 use druid::{AppLauncher, Color, Data, LocalizedString, Point, Rect, WidgetPod, WindowDesc};
 
@@ -97,7 +99,9 @@ fn root_scope_child() -> impl Widget<String> {
         .with_spacer(12.)
         .with_child(Focus::new(FocusDecorator::new(Button::new("Root"))).with_auto_focus(true))
         .with_spacer(12.)
-        .with_child(Focus::new(FocusDecorator::new(Button::new("Root"))))
+        // .with_child(Focus::new(FocusDecorator::new(Button::new("Root"))))
+        // .with_spacer(12.)
+        .with_child(TextBox::new().with_placeholder("Hello world!"))
         .with_spacer(12.)
         .with_child(Container::new(make_column()))
         .with_spacer(12.)
