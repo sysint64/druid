@@ -22,7 +22,6 @@ use druid::{commands, Data, FocusNode, HotKey, KbKey, Point, Rect, SysMods, Widg
 pub struct Focus<T> {
     child: WidgetPod<T, Box<dyn Widget<T>>>,
     auto_focus: bool,
-    focus_requested: bool,
     focus_node: FocusNode,
 }
 
@@ -33,7 +32,6 @@ impl<T: Data> Focus<T> {
             child: WidgetPod::new(child).boxed(),
             focus_node: FocusNode::empty(),
             auto_focus: false,
-            focus_requested: false,
         }
     }
 
@@ -105,8 +103,7 @@ impl<T: Data> Widget<T> for Focus<T> {
                 ctx.set_focus_node(self.focus_node);
                 ctx.register_for_focus();
 
-                if self.auto_focus && !self.focus_requested {
-                    self.focus_requested = true;
+                if self.auto_focus {
                     ctx.submit_command(commands::REQUEST_FOCUS.with(ctx.widget_id()));
                 }
             }
