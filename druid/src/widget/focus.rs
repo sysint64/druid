@@ -51,11 +51,6 @@ impl<T: Data> Widget<T> for Focus<T> {
         let previous_focus_node = ctx.focus_node();
         ctx.set_focus_node(self.focus_node);
 
-        if self.auto_focus && !self.focus_requested {
-            self.focus_requested = true;
-            ctx.request_focus();
-        }
-
         self.child.event(ctx, event, data, env);
 
         match event {
@@ -85,6 +80,16 @@ impl<T: Data> Widget<T> for Focus<T> {
                     ctx.request_paint();
                 }
             }
+            Event::Command(cmd) if cmd.is(commands::NEXT_FOCUS) => {
+                if self.focus_node.is_focused {
+                    ctx.focus_next();
+                }
+            }
+            Event::Command(cmd) if cmd.is(commands::PREV_FOCUS) => {
+                if self.focus_node.is_focused {
+                    ctx.focus_prev();
+                }
+            }
             _ => (),
         }
 
@@ -99,6 +104,11 @@ impl<T: Data> Widget<T> for Focus<T> {
                 self.focus_node.widget_id = Some(ctx.widget_id());
                 ctx.set_focus_node(self.focus_node);
                 ctx.register_for_focus();
+
+                if self.auto_focus && !self.focus_requested {
+                    self.focus_requested = true;
+                    ctx.submit_command(commands::REQUEST_FOCUS.with(ctx.widget_id()));
+                }
             }
             LifeCycle::FocusChanged(value) => {
                 self.focus_node.is_focused = *value;

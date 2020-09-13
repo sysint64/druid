@@ -267,6 +267,19 @@ impl<T: Data> Harness<'_, T> {
         self.inner.paint_rect(&mut self.piet, invalid_rect)
     }
 
+    pub fn focus_chain(&mut self) -> Vec<WidgetId> {
+        self.window()
+            .focus_chain()
+            .map(|chain| -> Vec<WidgetId> {
+                chain
+                    .iter()
+                    .filter(|node| node.widget_id.is_some())
+                    .map(|node| node.widget_id.unwrap())
+                    .collect()
+            })
+            .unwrap()
+    }
+
     #[allow(dead_code)]
     pub fn paint(&mut self) {
         self.paint_rect(self.window_size.to_rect())

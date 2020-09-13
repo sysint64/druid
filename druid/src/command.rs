@@ -265,8 +265,14 @@ pub mod sys {
     pub const FOCUS_NODE_FOCUS_CHANGED: Selector<bool> =
         Selector::new("druid-builtin.focus_node_focus_changed");
 
-    /// Request focus for widget
+    /// Request focus for the widget
     pub const REQUEST_FOCUS: Selector<WidgetId> = Selector::new("druid-builtin.request_focus");
+
+    /// Request next focus
+    pub const NEXT_FOCUS: Selector = Selector::new("druid-builtin.next_focus");
+
+    /// Request previous focus
+    pub const PREV_FOCUS: Selector = Selector::new("druid-builtin.prev_focus");
 }
 
 impl Selector<()> {

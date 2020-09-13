@@ -423,28 +423,150 @@ fn participate_in_autofocus() {
         harness.send_initial_events();
 
         // verify that we start out with four widgets registered for focus
-
-        let focus_chain = |harness: &Harness<String>| {
-            harness
-                .window()
-                .focus_chain()
-                .map(|chain| -> Vec<WidgetId> {
-                    chain
-                        .iter()
-                        .filter(|node| node.widget_id.is_some())
-                        .map(|node| node.widget_id.unwrap())
-                        .collect()
-                })
-                .unwrap()
-        };
-
-        assert_eq!(focus_chain(harness), &[id_1, id_2, id_3, id_4]);
+        assert_eq!(harness.focus_chain(), &[id_1, id_2, id_3, id_4]);
 
         // tell the replacer widget to swap its children
         harness.submit_command(REPLACE_CHILD);
 
         // verify that the two new children are registered for focus.
-        assert_eq!(focus_chain(harness), &[id_1, id_2, id_3, id_5, id_6]);
+        assert_eq!(harness.focus_chain(), &[id_1, id_2, id_3, id_5, id_6]);
+
+        // verify that no widgets still report that their children changed:
+        harness.inspect_state(|state| assert!(!state.children_changed))
+    })
+}
+
+#[test]
+fn multiple_autofocus() {
+    let (id_1, id_2, id_3, id_4, id_5, id_6) = widget_id6();
+
+    // this widget starts with a single child, and will replace them with a split
+    // when we send it a command.
+    let replacer = ReplaceChild::new(Focus::new(SizedBox::empty()).with_id(id_4), move || {
+        Split::columns(
+            Focus::new(SizedBox::empty())
+                .with_auto_focus(true)
+                .with_id(id_5),
+            Focus::new(SizedBox::empty())
+                .with_auto_focus(true)
+                .with_id(id_6),
+        )
+    });
+
+    let widget = Split::columns(
+        Flex::row()
+            .with_flex_child(
+                Focus::new(SizedBox::empty())
+                    .with_auto_focus(true)
+                    .with_id(id_1),
+                1.0,
+            )
+            .with_flex_child(
+                Focus::new(SizedBox::empty())
+                    .with_auto_focus(true)
+                    .with_id(id_2),
+                1.0,
+            )
+            .with_flex_child(
+                Focus::new(SizedBox::empty())
+                    .with_auto_focus(true)
+                    .with_id(id_3),
+                1.0,
+            ),
+        replacer,
+    );
+
+    Harness::create_simple("my test text".to_string(), widget, |harness| {
+        // verify that all widgets are marked as having children_changed
+        // (this should always be true for a new widget)
+        harness.inspect_state(|state| assert!(state.children_changed));
+
+        harness.send_initial_events();
+
+        // verify that we start out with four widgets registered for focus
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_3));
+
+        // tell the replacer widget to swap its children
+        harness.submit_command(REPLACE_CHILD);
+
+        // verify that after creating other widgets with auto focus, focused widget will change.
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_6));
+
+        // verify that no widgets still report that their children changed:
+        harness.inspect_state(|state| assert!(!state.children_changed))
+    })
+}
+
+#[test]
+fn focus_scope() {
+    let (id_1, id_2, id_3, id_4, id_5, id_6) = widget_id6();
+
+    let focus_scope_1 = FocusScope::new(
+        Flex::row()
+            .with_flex_child(Focus::new(SizedBox::empty()).with_id(id_1), 1.0)
+            .with_flex_child(Focus::new(SizedBox::empty()).with_id(id_2), 1.0)
+            .with_flex_child(Focus::new(SizedBox::empty()).with_id(id_3), 1.0),
+    );
+
+    let focus_scope_2 = FocusScope::new(
+        Flex::row()
+            .with_flex_child(Focus::new(SizedBox::empty()).with_id(id_4), 1.0)
+            .with_flex_child(Focus::new(SizedBox::empty()).with_id(id_5), 1.0)
+            .with_flex_child(Focus::new(SizedBox::empty()).with_id(id_6), 1.0),
+    );
+
+    let widget = Flex::column()
+        .with_child(focus_scope_1)
+        .with_child(focus_scope_2);
+
+    Harness::create_simple("my test text".to_string(), widget, |harness| {
+        // verify that all widgets are marked as having children_changed
+        // (this should always be true for a new widget)
+        harness.inspect_state(|state| assert!(state.children_changed));
+
+        harness.send_initial_events();
+
+        // Focus chain 1
+        // verify restricting focus traversal to the scoped controls by focusing forward
+        harness.submit_command(commands::REQUEST_FOCUS.with(id_1));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_1));
+        harness.submit_command(commands::NEXT_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_2));
+        harness.submit_command(commands::NEXT_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_3));
+        harness.submit_command(commands::NEXT_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_1));
+
+        // verify restricting focus traversal to the scoped controls by focusing backward
+        harness.submit_command(commands::PREV_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_3));
+        harness.submit_command(commands::PREV_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_2));
+        harness.submit_command(commands::PREV_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_1));
+        harness.submit_command(commands::PREV_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_3));
+
+        // Focus chain 2
+        // verify restricting focus traversal to the scoped controls by focusing forward
+        harness.submit_command(commands::REQUEST_FOCUS.with(id_4));
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_4));
+        harness.submit_command(commands::NEXT_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_5));
+        harness.submit_command(commands::NEXT_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_6));
+        harness.submit_command(commands::NEXT_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_4));
+
+        // verify restricting focus traversal to the scoped controls by focusing backward
+        harness.submit_command(commands::PREV_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_6));
+        harness.submit_command(commands::PREV_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_5));
+        harness.submit_command(commands::PREV_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_4));
+        harness.submit_command(commands::PREV_FOCUS);
+        assert_eq!(harness.window().focus_node.widget_id, Some(id_6));
 
         // verify that no widgets still report that their children changed:
         harness.inspect_state(|state| assert!(!state.children_changed))
